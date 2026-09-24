@@ -4,6 +4,8 @@ using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using MonoGame.Extended;
+using MonoGame.Extended.Shapes;
 
 namespace RopeSim;
 
@@ -12,7 +14,7 @@ public struct Node(Vector2 position, bool isLocked = true)
     private static int _idCount = 0;
     public int ID = ++_idCount;
     public Vector2 Position = position;
-    public Vector2 PreviousPosition = Vector2.Zero;
+    public Vector2 PreviousPosition = position;
     public bool IsLocked = isLocked;
 }
 
@@ -33,7 +35,7 @@ public class Game1 : Game
 
     // Simulation Properties
     private bool _isPaused = false;
-    private const float Gravity = 980.0f;
+    private const float Gravity = 0.98f;
     private const int NumberOfIterations = 5;
     private List<Node> _nodes = [];
     private List<Stick> _sticks = [];
@@ -87,16 +89,36 @@ public class Game1 : Game
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Color.CornflowerBlue);
+        GraphicsDevice.Clear(Color.DimGray);
 
-        // TODO: Add your drawing code here
-
+        // Drawing Sticks
+        _spriteBatch.Begin();
+        foreach (var stick in _sticks)
+        {
+            _spriteBatch.DrawLine(stick.NodeA.Position, stick.NodeB.Position, Color.LightGray, StickThickness);
+        }
+        
+        // Drawing Line From Selected Point
+        if (_selectedNode != null) _spriteBatch.DrawLine(_selectedNode.Value.Position, _prevMouseState.Position.ToVector2(), Color.LightGoldenrodYellow, StickThickness);
+        
+        // Drawing Nodes
+        foreach (var node in _nodes)
+        {
+            var color = node.IsLocked ? Color.PaleVioletRed : Color.White;
+            if (_selectedNode != null) color = (_selectedNode.Value.ID == node.ID) ? Color.LightBlue : color;
+            _spriteBatch.DrawCircle(node.Position, NodeRadius, 36, color, NodeRadius * 2);
+        }
+        _spriteBatch.End();
         base.Draw(gameTime);
     }
 
     private void UpdateInput(KeyboardState keyboardState, MouseState mouseState)
     {
-        if (IsKeyJustPressed(Keys.Space, keyboardState)) _isPaused = !_isPaused;
+        if (IsKeyJustPressed(Keys.Space, keyboardState))
+        {
+            Console.WriteLine(_isPaused);
+            _isPaused = !_isPaused;
+        }
 
         if (mouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
         {
@@ -145,9 +167,9 @@ public class Game1 : Game
                 )
             );
             _selectedNode = null;
-        } 
+        }
         else if (mouseState.MiddleButton == ButtonState.Pressed &&
-                   _prevMouseState.MiddleButton == ButtonState.Released)
+                 _prevMouseState.MiddleButton == ButtonState.Released)
         {
             for (var i = 0; i < _nodes.Count; i++)
             {
@@ -164,7 +186,17 @@ public class Game1 : Game
         {
             for (var i = 0; i < _nodes.Count; i++)
             {
-                
+                var stick = _sticks[i];
+                var closestPoint = GetClosestPointToSegment(
+                    mouseState.Position.ToVector2(),
+                    stick.NodeA.Position,
+                    stick.NodeB.Position
+                );
+                if (Vector2.Distance(mouseState.Position.ToVector2(), closestPoint) < StickMargin)
+                {
+                    Console.WriteLine("Removed Stick From Mouse");
+                    _sticks.RemoveAt(i);
+                }
             }
         }
     }
@@ -172,8 +204,10 @@ public class Game1 : Game
     private void UpdateSimulation(GameTime gameTime)
     {
         // No need to run sim if there are no points
+        
         if (_nodes.Count < 1) return;
-
+        Console.WriteLine("Sim Step");
+        
         var viewportWidth = _graphics.GraphicsDevice.Viewport.Width;
         var viewportHeight = _graphics.GraphicsDevice.Viewport.Height;
 
@@ -182,13 +216,14 @@ public class Game1 : Game
         {
             var node = _nodes[i];
             // Cleaning up nodes and sticks that are below the screen
-            if (node.Position.Y > viewportHeight / 2)
+            if (node.Position.Y > viewportHeight * 2)
             {
                 for (var j = 0; j < _sticks.Count; j++)
                 {
                     var stick = _sticks[j];
                     if (stick.NodeA.ID == node.ID || stick.NodeB.ID == node.ID)
                     {
+                        Console.WriteLine("Cleaned Up Stick");
                         _sticks.RemoveAt(j);
                     }
                 }
@@ -203,10 +238,10 @@ public class Game1 : Game
             var previousPosition = node.Position;
 
             node.Position += node.Position - node.PreviousPosition;
-            node.Position += new Vector2(-1, 0) * Gravity * gameTime.ElapsedGameTime.Milliseconds *
-                             gameTime.ElapsedGameTime.Milliseconds;
+            node.Position += new Vector2(0, 1) * Gravity;
 
             node.PreviousPosition = previousPosition;
+            _nodes[i] = node;
         }
 
         for (var i = 0; i < NumberOfIterations; i++)
@@ -228,5 +263,18 @@ public class Game1 : Game
     private bool IsKeyJustPressed(Keys key, KeyboardState keyboardState)
     {
         return (keyboardState.IsKeyDown(key) && _prevKeyboardState.IsKeyUp(key));
+    }
+
+    private Vector2 GetClosestPointToSegment(Vector2 point, Vector2 s1, Vector2 s2)
+    {
+        var segment = s2 - s1;
+        var segmentLengthSquared = segment.LengthSquared();
+
+        if (segmentLengthSquared == 0f) return s1;
+
+        var t = Vector2.Dot(point - s1, segment) / segmentLengthSquared;
+        t = MathHelper.Clamp(t, 0f, 1f);
+
+        return s1 + t * segment;
     }
 }

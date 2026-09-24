@@ -1,7 +1,8 @@
 ﻿using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework;
 using System;
-
+using MonoGame.Extended;
+using MonoGame.Extended.Shapes;
 namespace RopeSim
 {
     public static class GraphicsDeviceExtensions
