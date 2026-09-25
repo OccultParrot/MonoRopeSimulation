@@ -18,11 +18,11 @@ public struct Node(Vector2 position, bool isLocked = true)
     public bool IsLocked = isLocked;
 }
 
-public struct Stick(Node start, Node end, float distance)
+public struct Stick(int start, int end, float distance)
 {
-    public Node NodeA = start;
-    public Node NodeB = end;
-    public float Length = distance;
+    public int NodeAIndex = start;
+    public int NodeBIndex = end;
+    public readonly float Length = distance;
 }
 
 public class Game1 : Game
@@ -39,7 +39,7 @@ public class Game1 : Game
     private const int NumberOfIterations = 5;
     private List<Node> _nodes = [];
     private List<Stick> _sticks = [];
-    private Node? _selectedNode = null;
+    private int _selectedNode = -1;
 
     // Stick Properties
     private const float StickThickness = 10.0f;
@@ -95,17 +95,17 @@ public class Game1 : Game
         _spriteBatch.Begin();
         foreach (var stick in _sticks)
         {
-            _spriteBatch.DrawLine(stick.NodeA.Position, stick.NodeB.Position, Color.LightGray, StickThickness);
+            _spriteBatch.DrawLine(_nodes[stick.NodeAIndex].Position, _nodes[stick.NodeBIndex].Position, Color.LightGray, StickThickness);
         }
         
         // Drawing Line From Selected Point
-        if (_selectedNode != null) _spriteBatch.DrawLine(_selectedNode.Value.Position, _prevMouseState.Position.ToVector2(), Color.LightGoldenrodYellow, StickThickness);
+        if (_selectedNode > -1) _spriteBatch.DrawLine(_nodes[_selectedNode].Position, _prevMouseState.Position.ToVector2(), Color.LightGoldenrodYellow, StickThickness);
         
         // Drawing Nodes
         foreach (var node in _nodes)
         {
             var color = node.IsLocked ? Color.PaleVioletRed : Color.White;
-            if (_selectedNode != null) color = (_selectedNode.Value.ID == node.ID) ? Color.LightBlue : color;
+            if (_selectedNode > -1) color = (_nodes[_selectedNode].ID == node.ID) ? Color.LightBlue : color;
             _spriteBatch.DrawCircle(node.Position, NodeRadius, 36, color, NodeRadius * 2);
         }
         _spriteBatch.End();
@@ -123,12 +123,13 @@ public class Game1 : Game
         if (mouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
         {
             // Try to find closest node
-            foreach (var node in _nodes)
+            for (var i = 0; i < _nodes.Count; i++)
             {
+                var node = _nodes[i];
                 if (!(Vector2.Distance(node.Position, mouseState.Position.ToVector2()) <
                       NodeRadius * 2 + NodeMargin)) continue;
                 Console.WriteLine("Node Selected");
-                _selectedNode = node;
+                _selectedNode = i;
                 return;
             }
 
@@ -137,22 +138,22 @@ public class Game1 : Game
         }
         else if (mouseState.LeftButton == ButtonState.Released && _prevMouseState.LeftButton == ButtonState.Pressed)
         {
-            if (_selectedNode == null) return;
-            foreach (var node in _nodes)
+            if (_selectedNode < 0) return;
+            for (var i = 0; i < _nodes.Count; i++)
             {
                 if (
-                    node.ID != _selectedNode.Value.ID &&
-                    Vector2.Distance(node.Position, mouseState.Position.ToVector2()) < NodeRadius * 2 + NodeMargin
+                    i != _selectedNode &&
+                    Vector2.Distance(_nodes[i].Position, mouseState.Position.ToVector2()) < NodeRadius * 2 + NodeMargin
                 )
                 {
                     Console.WriteLine("Stick Drawn");
                     _sticks.Add(
                         new Stick(
-                            _selectedNode.Value,
-                            node,
-                            Vector2.Distance(_selectedNode.Value.Position, node.Position))
+                            _selectedNode,
+                            i,
+                            Vector2.Distance(_nodes[_selectedNode].Position, _nodes[i].Position))
                     );
-                    _selectedNode = null;
+                    _selectedNode = -1;
                     return;
                 }
             }
@@ -161,15 +162,14 @@ public class Game1 : Game
             // Make a new point and make a connection between selected point and new point.
             _nodes.Add(new Node(mouseState.Position.ToVector2(), false));
             _sticks.Add(
-                new Stick(_selectedNode.Value,
-                    _nodes[^1],
-                    Vector2.Distance(_selectedNode.Value.Position, mouseState.Position.ToVector2())
+                new Stick(_selectedNode,
+                    _nodes.Count -1,
+                    Vector2.Distance(_nodes[_selectedNode].Position, mouseState.Position.ToVector2())
                 )
             );
-            _selectedNode = null;
+            _selectedNode = -1;
         }
-        else if (mouseState.MiddleButton == ButtonState.Pressed &&
-                 _prevMouseState.MiddleButton == ButtonState.Released)
+        else if (IsKeyJustPressed(Keys.LeftAlt, keyboardState))
         {
             for (var i = 0; i < _nodes.Count; i++)
             {
@@ -184,13 +184,13 @@ public class Game1 : Game
         }
         else if (keyboardState.IsKeyDown(Keys.LeftShift))
         {
-            for (var i = 0; i < _nodes.Count; i++)
+            for (var i = 0; i < _sticks.Count; i++)
             {
                 var stick = _sticks[i];
                 var closestPoint = GetClosestPointToSegment(
                     mouseState.Position.ToVector2(),
-                    stick.NodeA.Position,
-                    stick.NodeB.Position
+                    _nodes[stick.NodeAIndex].Position,
+                    _nodes[stick.NodeBIndex].Position
                 );
                 if (Vector2.Distance(mouseState.Position.ToVector2(), closestPoint) < StickMargin)
                 {
@@ -206,29 +206,34 @@ public class Game1 : Game
         // No need to run sim if there are no points
         
         if (_nodes.Count < 1) return;
-        Console.WriteLine("Sim Step");
+        
         
         var viewportWidth = _graphics.GraphicsDevice.Viewport.Width;
         var viewportHeight = _graphics.GraphicsDevice.Viewport.Height;
 
         // Point updating
+        List<int> nodesToRemove = [];
         for (var i = 0; i < _nodes.Count; i++)
         {
             var node = _nodes[i];
             // Cleaning up nodes and sticks that are below the screen
             if (node.Position.Y > viewportHeight * 2)
             {
+                List<int> cullList = [];
                 for (var j = 0; j < _sticks.Count; j++)
                 {
                     var stick = _sticks[j];
-                    if (stick.NodeA.ID == node.ID || stick.NodeB.ID == node.ID)
+                    if (stick.NodeAIndex == i || stick.NodeBIndex == i)
                     {
-                        Console.WriteLine("Cleaned Up Stick");
-                        _sticks.RemoveAt(j);
+                        cullList.Add(j);
                     }
                 }
+                // Sort the list so biggest
+                cullList.Sort((a, b) => b.CompareTo(a));
+                // Then remove them in order
+                foreach (var index in cullList) _sticks.RemoveAt(index);
 
-                _nodes.RemoveAt(i);
+                nodesToRemove.Add(node.ID);
                 continue;
             }
 
@@ -243,19 +248,26 @@ public class Game1 : Game
             node.PreviousPosition = previousPosition;
             _nodes[i] = node;
         }
-
+        nodesToRemove.Sort((a, b) => b.CompareTo(a));
+        foreach (var node in nodesToRemove) _nodes.RemoveAt(node);
+        
         for (var i = 0; i < NumberOfIterations; i++)
         {
             for (var j = 0; j < _sticks.Count(); j++)
             {
+               
                 var stick = _sticks[j];
-                var stickCenter = (stick.NodeA.Position + stick.NodeB.Position) / 2;
-                var stickDirection = Vector2.Normalize(stick.NodeA.Position - stick.NodeB.Position);
+                var nodeA = _nodes[stick.NodeAIndex];
+                var nodeB = _nodes[stick.NodeBIndex];
+                var stickCenter = (nodeA.Position + nodeB.Position) / 2;
+                var stickDirection = Vector2.Normalize(nodeA.Position - nodeB.Position);
 
-                if (!stick.NodeA.IsLocked) stick.NodeA.Position = stickCenter + stickDirection * stick.Length / 2;
-                if (!stick.NodeB.IsLocked) stick.NodeB.Position = stickCenter + stickDirection * stick.Length / 2;
+                if (!nodeA.IsLocked) nodeA.Position = stickCenter + stickDirection * stick.Length / 2;
+                if (!nodeB.IsLocked) nodeB.Position = stickCenter - stickDirection * stick.Length / 2;
 
                 _sticks[j] = stick;
+                _nodes[stick.NodeAIndex] = nodeA;
+                _nodes[stick.NodeBIndex] = nodeB;
             }
         }
     }
